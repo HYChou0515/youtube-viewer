@@ -1,3 +1,14 @@
+## Changes
+### U2Music
+
+* Quiet youtube stream interface
+* Allow downloading while streaming
+* POSIX only
+
+### youtube-viewer
+
+* new option: -ds|--download-stream: allow downloading while streaming
+
 ## youtube-viewer
 
 A lightweight application for searching and streaming videos from YouTube.
@@ -131,6 +142,7 @@ After installing, you can find documentation with the following commands:
 
 ### LICENSE AND COPYRIGHT
 
+Copyright (C) 2019-2019 HYChou0515 
 Copyright (C) 2012-2019 Trizen
 
 This program is free software; you can redistribute it and/or modify it

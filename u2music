@@ -1,0 +1,189 @@
+#!/bin/bash
+
+WORK_FOLDER=$HOME/.u2music
+HISTORY=$WORK_FOLDER/history
+TMP=$WORK_FOLDER/tmp
+DL_DIR=$WORK_FOLDER/downloaded
+SCREEN_SESSION=u2music
+
+NUMBER_REGEX='^[0-9]+$'
+
+mkdir -p $WORK_FOLDER
+touch $HISTORY
+
+help_message(){
+	youtube-viewer -h
+	youtube-viewer -T
+	youtube-viewer -E
+	echo ""
+	echo ""
+	echo "USAGE $0 [options] [search scripts]"
+	echo "options: --history(-i) [num]"
+	echo "             serach for history line=number"
+	echo "             num=empty to see all history"
+	echo "         --clear(-c) [num]"
+	echo "             keep the latest [num] historys"
+	echo "             num=empty to clear all history"
+	echo "         --time(-t) [sec]"
+	echo "             set time limits (default=600)"
+	echo "             sec=empty to unlimit time"
+	echo "         --no-shuffle"
+	echo "             do not shuffle the results"
+	echo "         --results(-r) [num]"
+	echo "             number of searched results (default=25)"
+	echo "         --no-download(-nd)"
+	echo "             do not download while streaming"
+	echo "         --send(-s) [\"msg\"]"
+	echo "             send message to mpv used by u2music"
+	echo "         --kill(-k)"
+	echo "             kill all u2music processes"
+	echo "         --help(-h)"
+	echo "             see help messages"
+}
+
+
+TIME_LIMIT=600
+RESULTS_NUM=25
+DOWNLOAD_MODE="on"
+POSITIONAL=()
+while [[ $# -gt 0 ]]
+do
+key="$1"
+
+case $key in
+	-i|--history)
+		HIST_NUMBER="$2"
+		shift # past argument
+		if [[ $HIST_NUMBER =~ $NUMBER_REGEX ]] ; then
+			shift # past value
+			if ((0 < $HIST_NUMBER && $HIST_NUMBER <= $(wc -l < $HISTORY))); then
+				SEARCH=$(head -$HIST_NUMBER $HISTORY | tail -1)
+			else
+				echo "number larger than history size" 
+				exit 0
+			fi
+		elif [[ -z $HIST_NUMBER ]]; then
+			cat -n $HISTORY
+			exit 0
+		else
+			help_message
+			exit 0
+		fi
+		;;
+	-c|--clear)
+		KEEP_NUMBER="$2"
+		shift # past argument
+		if [[ $KEEP_NUMBER =~ $NUMBER_REGEX ]]; then
+			shift # past value
+			echo 
+			read -p "Only keep latest $KEEP_NUMBER history? " -n 1 -r
+			if [[ $REPLY =~ ^[Yy]$ ]]; then
+				head -$KEEP_NUMBER $HISTORY > $TMP
+				mv $TMP $HISTORY
+			fi
+			cat -n $HISTORY
+		elif [[ -z $KEEP_NUMBER ]]; then
+			read -p "Clear all history? " -n 1 -r
+			if [[ $REPLY =~ ^[Yy]$ ]]; then
+				rm $HISTORY
+			fi
+		else
+			help_message
+		fi
+		exit 0
+		;;
+	-t|--time)
+		if [[ $2 =~ $NUMBER_REGEX ]] ; then
+			TIME_LIMIT=$2
+			shift # past value
+		else
+			TIME_LIMIT=""
+		fi
+		shift # past argument
+		;;
+	--no-shuffle)
+		shift # past argument
+		NO_SHUFFLE="y"
+		;;
+	-r|--results)
+		if [[ $2 =~ $NUMBER_REGEX ]] ; then
+			RESULTS_NUM=$2
+			shift # past value
+		else
+			RESULTS_NUM=""
+		fi
+		shift #past argument
+		;;
+	-nd|--no-download)
+		DOWNLOAD_MODE="off"
+		shift # past argument
+		;;
+	-s|--send)
+		if screen -list | grep -q "$SCREEN_SESSION"; then
+			MESSAGE=$2
+			shift # past value
+			screen -S $SCREEN_SESSION -p 0 -X stuff "\"$MESSAGE^M\""
+		else
+			echo "u2music not started"
+		fi
+		shift # past argument
+		exit 0
+		;;
+	-k|--kill)
+		shift # past argument
+		if screen -list | grep -q "$SCREEN_SESSION"; then
+			screen -X -S $SCREEN_SESSION quit
+		fi
+		exit 0
+		;;
+	-h|--help)
+		shift # past argument
+		help_message
+		exit 0
+		;;
+	*) # directly append youtube-viewer 
+		POSITIONAL+=("$1") # save it in an array for later
+		shift # past argument
+		;;
+esac
+done
+
+set -- "${POSITIONAL[@]}"
+
+if [[ -n $SEARCH ]]; then
+	SEARCH="$SEARCH $@"
+else
+	SEARCH=$@
+fi
+
+#append head
+echo $SEARCH | cat - $HISTORY > $TMP && mv $TMP $HISTORY
+#show uniq line
+awk '!x[$0]++' $HISTORY > $TMP
+mv $TMP $HISTORY
+
+#search
+BASIC_OPTION="-A -n --resolution=audio --downloads-dir=$DL_DIR --filename='*FTITLE*.*FORMAT*'"
+if [[ -z $SEARCH ]]; then
+	NO_SHUFFLE=""
+	RESULT_NUM="50"
+	CMD_PREFIX="youtube-viewer -c --std-input="3
+else
+	CMD_PREFIX="youtube-viewer"
+fi
+OPTION=""
+if [[ -n $TIME_LIMIT ]]; then
+	OPTION="$OPTION --max-seconds=$TIME_LIMIT"
+fi
+if [[ -z $NO_SHUFFLE ]]; then
+	OPTION="$OPTION -s"
+fi
+if [[ -n $RESULT_NUM ]]; then
+	OPTION="$OPTION --results=$RESULT_NUM"
+fi
+if [ "$DOWNLOAD_MODE" = "on" ]; then
+	OPTION="$OPTION -ds"
+fi
+cmd="$CMD_PREFIX $BASIC_OPTION $OPTION $SEARCH"
+echo \"$OPTION $SEARCH\"
+screen -S $SCREEN_SESSION -dm bash -c "$cmd"
