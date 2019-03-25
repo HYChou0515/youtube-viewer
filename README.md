@@ -58,6 +58,10 @@ To install `gtk-youtube-viewer` along with `youtube-viewer`, run:
 
 ### DEPENDENCIES
 
+#### For u2music:
+
+* [screen](https://www.gnu.org/software/screen/)
+
 #### For youtube-viewer:
 
 * [libwww-perl](https://metacpan.org/release/libwww-perl)
