@@ -3177,69 +3177,78 @@ sub play_videos {
         }
         else {
             print_video_info($video);
-            my $command = get_player_command($streaming, $video);
+			my $fat32safe = $opt{fat32safe};
+			state $unix_like = $^O =~ /^(?:linux|freebsd|openbsd)\z/i;
 
-            if ($yv_obj->get_debug) {
-                say "-> Resolution: $streaming->{resolution}";
-                say "-> Video itag: $streaming->{streaming}{itag}";
-                say "-> Audio itag: $streaming->{streaming}{__AUDIO__}{itag}" if exists $streaming->{streaming}{__AUDIO__};
-                say "-> Video type: $streaming->{streaming}{type}";
-                say "-> Audio type: $streaming->{streaming}{__AUDIO__}{type}" if exists $streaming->{streaming}{__AUDIO__};
-                say "-> Command: $command";
+			if (not $fat32safe and not $unix_like) {
+				$fat32safe = 1;
+			}
+			my $video_filename = $yv_utils->format_text(
+														streaming => $streaming,
+														info      => $video,
+														text      => $opt{video_filename_format},
+														escape    => 0,
+														fat32safe => $fat32safe,
+													   );
+			$video_filename = catfile($opt{downloads_dir}, $video_filename);
+			my $video_info = $streaming->{streaming};
+			my $filesize_wget = -1;
+			my $retry=0;
+			while ($retry < 10) {
+				$filesize_wget = substr(`wget "$video_info->{url}" --spider --server-response -O - 2>&1 | sed -ne '/Content-Length/{s/.*: //;p}'`, 0, -1);
+				$retry = $retry + 1;
+				last if ($filesize_wget > 0);
+			}
+			my $already_exist=0;
+			if (-e "$video_filename") {
+				my $filesize_sys = -s "$video_filename";
+				if ($filesize_sys != $filesize_wget || !$filesize_wget > 0) {
+					unlink $video_filename;
+				}
+				else{
+					$already_exist = 1;
+				}
+			}
+			my $pid = -1;
+			if ($already_exist == 1) {
+				$streaming->{streaming}{url} = "$video_filename";
+			} elsif ($opt{download_stream}) {
+				if (not -d $opt{downloads_dir}) {
+					require File::Path;
+					unless (File::Path::make_path($opt{downloads_dir})) {
+						warn colored("\n[!] Can't create directory '$opt{downloads_dir}': $1", 'bold red') . "\n";
+					}
+				}
+				$pid=fork();
+				if ($pid == 0) {
+					my @cmd = ($opt{wget_cmd}, q{-nc}, $video_info->{url} , q{-O}, $video_filename);
+					system(@cmd);
+					if (-e "$video_filename" && $filesize_wget > 0) {
+						my $filesize_sys = -s "$video_filename";
+						if ($filesize_sys != $filesize_wget) {
+							unlink $video_filename;
+						}
+					}
+					exit();
+				}
             }
-            my $pid;
-            if ( !$opt{download_video} && $opt{download_stream}) {
-                $pid=fork();
-                if ($pid == 0) {
-                    my $fat32safe = $opt{fat32safe};
-                    state $unix_like = $^O =~ /^(?:linux|freebsd|openbsd)\z/i;
+			my $command = get_player_command($streaming, $video);
 
-                    if (not $fat32safe and not $unix_like) {
-                        $fat32safe = 1;
-                    }
-                    my $video_filename = $yv_utils->format_text(
-                                                                streaming => $streaming,
-                                                                info      => $video,
-                                                                text      => $opt{video_filename_format},
-                                                                escape    => 0,
-                                                                fat32safe => $fat32safe,
-                                                               );
-                    if (not -d $opt{downloads_dir}) {
-                        require File::Path;
-                        unless (File::Path::make_path($opt{downloads_dir})) {
-                            warn colored("\n[!] Can't create directory '$opt{downloads_dir}': $1", 'bold red') . "\n";
-                        }
-                    }
-                    $video_filename = catfile($opt{downloads_dir}, $video_filename);
-                    my $video_info = $streaming->{streaming};
-                    my $filesize_wget = substr(`wget "$video_info->{url}" --spider --server-response -O - 2>&1 | sed -ne '/Content-Length/{s/.*: //;p}'`, 0, -1);
-                    if (-e "$video_filename" && $filesize_wget > 0) {
-                        my $filesize_sys = -s "$video_filename";
-                        if ($filesize_sys != $filesize_wget) {
-                            unlink $video_filename;
-                        }
-                    }
-                    my @cmd = ($opt{wget_cmd}, q{-nc}, $video_info->{url} , q{-O}, $video_filename);
-                    my $return_code = system(@cmd);
-                    if (-e "$video_filename" && $filesize_wget > 0) {
-                        my $filesize_sys = -s "$video_filename";
-                        if ($filesize_sys != $filesize_wget) {
-                            unlink $video_filename;
-                        }
-                    }
-                    exit();
-                }
-            }
-            $yv_obj->proxy_system($command);    # execute the video player
-            if ($? and $? != 512) {
-                $opt{auto_next_page} = 0;
-                return;
-            }
-            if ( !$opt{download_video} && $opt{download_stream}) {
-                `pkill -9 -P $pid`;
-            }
-        }
-
+			if ($yv_obj->get_debug) {
+				say "-> Resolution: $streaming->{resolution}";
+				say "-> Video itag: $streaming->{streaming}{itag}";
+				say "-> Audio itag: $streaming->{streaming}{__AUDIO__}{itag}" if exists $streaming->{streaming}{__AUDIO__};
+				say "-> Video type: $streaming->{streaming}{type}";
+				say "-> Audio type: $streaming->{streaming}{__AUDIO__}{type}" if exists $streaming->{streaming}{__AUDIO__};
+				say "-> Command: $command";
+			}
+			$yv_obj->proxy_system($command);    # execute the video player
+			if ($? and $? != 512) {
+				$opt{auto_next_page} = 0;
+				return;
+			}
+			`pkill -9 -P $pid` if ($pid >= 0);
+		}
         press_enter_to_continue() if $opt{confirm};
     }
 
